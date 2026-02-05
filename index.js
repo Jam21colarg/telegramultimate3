@@ -19,17 +19,18 @@ if (DOMAIN && !DOMAIN.startsWith('http')) {
 const app = express();
 app.use(express.json());
 
+// Ruta de Healthcheck: Vital para que Railway mantenga el bot encendido
 app.get('/', (req, res) => {
     console.log('--- Healthcheck recibido por Railway ✅ ---');
     res.status(200).send('Bot Online con Groq');
 });
 
+// Forzamos la escucha en 0.0.0.0
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Servidor Express activo en puerto ${PORT}`);
 });
 
 // ================= CONFIGURACIÓN DE IA (GROQ) =================
-// Usamos la librería de OpenAI pero apuntamos a los servidores de Groq
 const openai = new OpenAI({
   apiKey: process.env.GROQ_API_KEY, 
   baseURL: "https://api.groq.com/openai/v1" 
@@ -42,7 +43,7 @@ async function parseReminderWithAI(message) {
   const now = moment().tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss dddd');
   try {
     const response = await openai.chat.completions.create({
-      model: 'llama3-8b-8192', // Modelo gratuito y ultra rápido
+      model: 'llama3-8b-8192',
       messages: [
         { 
           role: 'system', 
@@ -71,15 +72,15 @@ async function parseReminderWithAI(message) {
 }
 
 // ================= COMANDOS DEL BOT =================
-bot.start(ctx => ctx.reply('🚀 Bot de Recordatorios (Gratis con Groq) Activo.\nEnvíame algo como: "Mañana a las 10am llamar al dentista"'));
+bot.start(ctx => ctx.reply('🚀 Bot Activo (Gratis con Groq).\nEnvíame algo como: "Mañana a las 10am llamar al dentista"'));
 
 bot.command('list', async ctx => {
     try {
         const reminders = await db.getReminders(ctx.from.id);
-        if (!reminders.length) return ctx.reply('📭 No tienes recordatorios pendientes.');
+        if (!reminders || !reminders.length) return ctx.reply('📭 No tienes recordatorios pendientes.');
         let msg = '⏰ **Tus Recordatorios:**\n\n';
         reminders.forEach(r => {
-            msg += `🆔 ${r.id} | ${r.texto}\n📅 ${moment(r.fecha).tz(TIMEZONE).format('DD/MM HH:mm')}\n\n`;
+            msg += `🆔 ${r.id} | ${r.texto}\n📅 ${moment(r.fecha).format('DD/MM HH:mm')}\n\n`;
         });
         ctx.reply(msg);
     } catch (e) {
@@ -93,7 +94,6 @@ bot.on('text', async ctx => {
   if (text.startsWith('/')) return;
 
   const waiting = await ctx.reply('Procesando con IA... ⏳');
-  
   const res = await parseReminderWithAI(text);
 
   if (res && res.error) {
@@ -101,7 +101,7 @@ bot.on('text', async ctx => {
   }
 
   if (!res || !res.date) {
-    return ctx.telegram.editMessageText(ctx.chat.id, waiting.message_id, null, '❌ No pude entender la fecha. Intenta: "Mañana a las 10am..."');
+    return ctx.telegram.editMessageText(ctx.chat.id, waiting.message_id, null, '❌ No pude entender la fecha.');
   }
 
   try {
@@ -114,18 +114,20 @@ bot.on('text', async ctx => {
         `✅ **¡Anotado!**\n\n🔔 ${res.texto}\n📅 ${fechaOk}\n🆔 ${id}`
     );
   } catch (dbErr) {
-    console.error(dbErr);
-    ctx.telegram.editMessageText(ctx.chat.id, waiting.message_id, null, '❌ Error al guardar en la base de datos.');
+    ctx.telegram.editMessageText(ctx.chat.id, waiting.message_id, null, '❌ Error al guardar en DB.');
   }
 });
 
 // ================= CRON (REVISIÓN CADA MINUTO) =================
 cron.schedule('* * * * *', async () => {
+  const now = moment().tz(TIMEZONE).format('YYYY-MM-DD HH:mm');
   try {
-    const due = await db.getDueReminders();
-    for (const r of due) {
-      await bot.telegram.sendMessage(r.user_id, `🔔 **RECORDATORIO:**\n\n${r.texto}`);
-      await db.markAsSent(r.id);
+    const due = await db.getDueReminders(now);
+    if (due && due.length > 0) {
+        for (const r of due) {
+          await bot.telegram.sendMessage(r.user_id, `🔔 **RECORDATORIO:**\n\n${r.texto}`);
+          await db.markAsSent(r.id);
+        }
     }
   } catch (e) {
     console.error('Error en Cron:', e.message);
@@ -133,15 +135,26 @@ cron.schedule('* * * * *', async () => {
 });
 
 // ================= LANZAMIENTO INTEGRADO =================
-
-
 if (DOMAIN) {
   const secretPath = `/telegraf/${bot.secretPathComponent()}`;
   bot.telegram.setWebhook(`${DOMAIN}${secretPath}`)
-    .then(() => console.log('🤖 Webhook de Telegram configurado exitosamente'));
+    .then(() => console.log('🤖 Webhook de Telegram configurado exitosamente'))
+    .catch(err => console.error('❌ Error Webhook:', err));
+    
   app.use(bot.webhookCallback(secretPath));
 } else {
-  bot.launch().then(() => console.log('🤖 Bot iniciado en modo Polling (Desarrollo)'));
+  bot.launch().then(() => console.log('🤖 Polling activo (Local)'));
 }
 
-// Mantenemos el proceso vivo sin cerrar el server
+// ================= MANTENIMIENTO DE PROCESO (KEEP-ALIVE) =================
+// Esto evita que el proceso se cierre si no hay actividad
+setInterval(() => {
+    if (server.listening) {
+        // Mantiene el event loop ocupado
+    }
+}, 600000); // 10 minutos
+
+// Captura de errores globales para evitar cierres inesperados
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
