@@ -6,11 +6,13 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 class Database {
   constructor() {
     this.db = new sqlite3.Database(DB_PATH, () => {
+      this.db.serialize();
       this.init();
     });
   }
 
   init() {
+    // REMINDERS
     this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +25,7 @@ class Database {
       )
     `);
 
+    // NOTES
     this.db.run(`
       CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,21 +42,23 @@ class Database {
   // -------- REMINDERS --------
 
   createReminder(user, text, date, tags = "") {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.run(
         `INSERT INTO reminders (user_id,texto,fecha,tags) VALUES (?,?,?,?)`,
         [user, text, date, tags],
-        function () { r(this.lastID); }
+        function () {
+          resolve(this.lastID);
+        }
       );
     });
   }
 
   getDueReminders() {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.all(
         `SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= datetime('now')`,
         [],
-        (_, rows) => r(rows)
+        (_, rows) => resolve(rows)
       );
     });
   }
@@ -63,50 +68,58 @@ class Database {
   }
 
   getReminders(user) {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.all(
-        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente'`,
+        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente' ORDER BY fecha ASC`,
         [user],
-        (_, rows) => r(rows)
+        (_, rows) => resolve(rows)
       );
     });
   }
 
   markAsDone(id, user) {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.run(
         `UPDATE reminders SET estado='completado' WHERE id=? AND user_id=?`,
         [id, user],
-        function () { r(this.changes); }
+        function () {
+          resolve resolve = this.changes > 0;
+          resolve(resolve);
+        }
       );
     });
   }
 
   deleteReminder(id, user) {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.run(
         `DELETE FROM reminders WHERE id=? AND user_id=?`,
         [id, user],
-        function () { r(this.changes); }
+        function () {
+          resolve(this.changes > 0);
+        }
       );
     });
   }
 
   // -------- NOTES --------
 
-  createNote(user, text, tags) {
-    this.db.run(
-      `INSERT INTO notes (user_id,texto,tags) VALUES (?,?,?)`,
-      [user, text, tags.join(',')]
-    );
+  createNote(user, text, tags = "") {
+    return new Promise(resolve => {
+      this.db.run(
+        `INSERT INTO notes (user_id,texto,tags) VALUES (?,?,?)`,
+        [user, text, tags],
+        () => resolve()
+      );
+    });
   }
 
   getNotes(user) {
-    return new Promise(r => {
+    return new Promise(resolve => {
       this.db.all(
         `SELECT * FROM notes WHERE user_id=? ORDER BY created_at DESC`,
         [user],
-        (_, rows) => r(rows)
+        (_, rows) => resolve(rows)
       );
     });
   }
