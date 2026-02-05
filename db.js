@@ -1,23 +1,46 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'reminders.db');
+// 1. CONFIGURACIÓN DE RUTA (Prioriza el volumen de Railway)
+const MOUNT_PATH = '/data'; 
+const DB_NAME = 'reminders.db';
+
+let DB_PATH;
+
+// Verificamos si existe la carpeta del volumen
+if (fs.existsSync(MOUNT_PATH)) {
+    DB_PATH = path.join(MOUNT_PATH, DB_NAME);
+    console.log(`📂 Base de datos en volumen persistente: ${DB_PATH}`);
+} else {
+    DB_PATH = path.join(__dirname, DB_NAME);
+    console.log(`💻 Base de datos en modo local: ${DB_PATH}`);
+}
+
 const db = new sqlite3.Database(DB_PATH);
 
-// Inicialización inmediata
+// 2. INICIALIZACIÓN ROBUSTA
 db.serialize(() => {
+  // Crear tabla principal
   db.run(`CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     texto TEXT NOT NULL,
     fecha TEXT NOT NULL,
     estado TEXT DEFAULT 'pendiente',
-    tags TEXT,
+    tags TEXT DEFAULT '',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
-  console.log('✅ Estructura de DB verificada');
+
+  // PARCHE: Asegurar que la columna 'tags' exista por si la tabla es vieja
+  db.run(`ALTER TABLE reminders ADD COLUMN tags TEXT DEFAULT ''`, (err) => {
+      if (!err) console.log('✅ Columna "tags" añadida correctamente.');
+  });
+
+  console.log('✅ Estructura de DB lista.');
 });
 
+// 3. EXPORTACIÓN DE MÉTODOS
 module.exports = {
   createReminder: (user_id, texto, fecha, tags = '') => {
     return new Promise((resolve, reject) => {
