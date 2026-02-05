@@ -6,90 +6,67 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 class Database {
   constructor() {
     this.db = new sqlite3.Database(DB_PATH, (err) => {
-      if (err) {
-        console.error('❌ Error al conectar DB:', err);
-        return;
+      if (err) console.error('❌ Error al conectar DB:', err);
+      else {
+        console.log('✅ Base de datos SQLite conectada');
+        this.init();
       }
-      console.log('✅ Base de datos SQLite conectada');
-      this.init();
     });
   }
 
   init() {
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS reminders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        texto TEXT NOT NULL,
-        fecha DATETIME NOT NULL,
-        estado TEXT DEFAULT 'pendiente',
-        tags TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        texto TEXT NOT NULL,
-        tags TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Tablas listas y columnas tags aseguradas');
+    this.db.serialize(() => {
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS reminders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          texto TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          estado TEXT DEFAULT 'pendiente',
+          tags TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    });
   }
 
   createReminder(user_id, texto, fecha, tags = '') {
     return new Promise((resolve, reject) => {
-      this.db.run(
-        `INSERT INTO reminders (user_id, texto, fecha, tags) VALUES (?,?,?,?)`,
-        [user_id, texto, fecha, tags],
-        function(err) {
-          if (err) return reject(err);
-          resolve(this.lastID);
-        }
-      );
+      const stmt = this.db.prepare(`INSERT INTO reminders (user_id, texto, fecha, tags) VALUES (?,?,?,?)`);
+      stmt.run([user_id, texto, fecha, tags], function(err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      });
+      stmt.finalize();
     });
   }
 
   getReminders(user_id, estado = 'pendiente') {
     return new Promise((resolve, reject) => {
-      this.db.all(
-        `SELECT * FROM reminders WHERE user_id=? AND estado=? ORDER BY fecha ASC`,
-        [user_id, estado],
-        (err, rows) => (err ? reject(err) : resolve(rows))
-      );
+      this.db.all(`SELECT * FROM reminders WHERE user_id=? AND estado=? ORDER BY fecha ASC`, [user_id, estado], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
     });
   }
 
-  // MODIFICADO: Ahora acepta la hora actual desde el index.js para evitar líos de zona horaria
   getDueReminders(currentTime) {
     return new Promise((resolve, reject) => {
-      // Si no pasamos hora, usamos la del sistema, pero mejor pasarla desde Moment
-      const timeToCompare = currentTime || "datetime('now')";
-      this.db.all(
-        `SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= ? ORDER BY fecha ASC`,
-        [timeToCompare],
-        (err, rows) => (err ? reject(err) : resolve(rows))
-      );
+      this.db.all(`SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= ?`, [currentTime], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
     });
   }
 
   markAsSent(id) {
     return new Promise((resolve, reject) => {
-      this.db.run(
-        `UPDATE reminders SET estado='enviado' WHERE id=?`,
-        [id],
-        function(err) {
-          if (err) return reject(err);
-          resolve(this.changes > 0);
-        }
-      );
+      this.db.run(`UPDATE reminders SET estado='enviado' WHERE id=?`, [id], (err) => {
+        if (err) reject(err);
+        else resolve(true);
+      });
     });
   }
-
-  // ... (tus otros métodos markAsDone, deleteReminder, etc., están perfectos)
 }
 
 module.exports = new Database();
