@@ -24,7 +24,7 @@ class Database {
         tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, () => console.log('✅ Tabla reminders lista'));
 
     // -------- TABLA NOTES --------
     this.db.run(`
@@ -35,13 +35,10 @@ class Database {
         tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
-
-    console.log('✅ Tablas listas y columnas tags aseguradas');
+    `, () => console.log('✅ Tabla notes lista'));
   }
 
   // ---------- REMINDERS ----------
-
   createReminder(user_id, texto, fecha, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -115,7 +112,6 @@ class Database {
   }
 
   // ---------- NOTES ----------
-
   createNote(user_id, texto, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -139,11 +135,11 @@ class Database {
     });
   }
 
-  // ---------- Cierra DB ----------
+  // Cierra la DB (opcional)
   close() {
-    this.db.close((err) => {
+    this.db.close(err => {
       if (err) console.error('❌ Error cerrando DB:', err);
-      else console.log('✅ Base de datos cerrada');
+      else console.log('Base de datos cerrada');
     });
   }
 }
