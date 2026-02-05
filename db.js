@@ -5,7 +5,9 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(DB_PATH, () => this.init());
+    this.db = new sqlite3.Database(DB_PATH, () => {
+      this.init();
+    });
   }
 
   init() {
@@ -31,29 +33,20 @@ class Database {
       )
     `);
 
-    console.log('✅ Tablas listas');
+    console.log("✅ Tablas listas");
   }
 
   // ---------- REMINDERS ----------
 
-  createReminder(user, text, date, tags = '') {
-    return new Promise(resolve => {
+  createReminder(user, text, date, tags = "") {
+    return new Promise((resolve, reject) => {
       this.db.run(
         `INSERT INTO reminders (user_id,texto,fecha,tags) VALUES (?,?,?,?)`,
         [user, text, date, tags],
-        function () {
-          resolve(this.lastID);
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.lastID);
         }
-      );
-    });
-  }
-
-  getReminders(user) {
-    return new Promise(resolve => {
-      this.db.all(
-        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente'`,
-        [user],
-        (_, rows) => resolve(rows)
       );
     });
   }
@@ -70,6 +63,16 @@ class Database {
 
   markAsSent(id) {
     this.db.run(`UPDATE reminders SET estado='enviado' WHERE id=?`, [id]);
+  }
+
+  getReminders(user) {
+    return new Promise(resolve => {
+      this.db.all(
+        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente'`,
+        [user],
+        (_, rows) => resolve(rows)
+      );
+    });
   }
 
   markAsDone(id, user) {
