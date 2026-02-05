@@ -3,6 +3,7 @@ const { Telegraf } = require('telegraf');
 const chrono = require('chrono-node');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
+const express = require('express');
 const db = require('./db');
 
 const TIMEZONE = 'America/Argentina/Buenos_Aires';
@@ -13,6 +14,22 @@ if (!process.env.BOT_TOKEN) {
 }
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// ---------------- HTTP SERVER (Railway + UptimeRobot) ----------------
+
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send('Bot online ✅');
+});
+
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, () => {
+  console.log(`🌐 HTTP server listening on ${PORT}`);
+});
+
+// ------------------------------------------------------------------
 
 const customChrono = chrono.casual.clone();
 customChrono.parsers.push({
@@ -60,266 +77,108 @@ function getRelativeTimeText(date) {
   const diffHours = targetDate.diff(now, 'hours');
   const diffDays = targetDate.diff(now, 'days');
 
-  if (diffMinutes < 60) {
-    return `en ${diffMinutes} minutos`;
-  } else if (diffHours < 24) {
-    return `en ${diffHours} horas`;
-  } else if (diffDays === 0) {
-    return `hoy a las ${targetDate.format('HH:mm')}`;
-  } else if (diffDays === 1) {
-    return `mañana a las ${targetDate.format('HH:mm')}`;
-  } else {
-    return `el ${targetDate.format('DD/MM')} a las ${targetDate.format('HH:mm')}`;
-  }
+  if (diffMinutes < 60) return `en ${diffMinutes} minutos`;
+  if (diffHours < 24) return `en ${diffHours} horas`;
+  if (diffDays === 0) return `hoy a las ${targetDate.format('HH:mm')}`;
+  if (diffDays === 1) return `mañana a las ${targetDate.format('HH:mm')}`;
+
+  return `el ${targetDate.format('DD/MM')} a las ${targetDate.format('HH:mm')}`;
 }
 
+// ---------------- BOT ----------------
+
 bot.start((ctx) => {
-  const welcomeMessage = `👋 ¡Hola! Soy tu asistente de recordatorios.
+  ctx.reply(`👋 ¡Hola! Soy tu asistente de recordatorios.
 
-Simplemente escríbeme lo que quieres recordar en lenguaje natural:
-
-💬 Ejemplos:
-• "mañana a las 10 recuérdame llamar a Juan"
+Ejemplos:
+• "mañana a las 10 llamar a Juan"
 • "en 2 horas enviar presupuesto"
-• "el viernes a las 15 pagar alquiler"
-• "recordarme comprar pan a las 18"
+• "viernes pagar alquiler"
 
-📋 Comandos disponibles:
-/list - Ver tus recordatorios pendientes
-/done <id> - Marcar como completado
-/delete <id> - Eliminar recordatorio
-/help - Ver esta ayuda
-
-¡Pruébame ahora! 🚀`;
-
-  ctx.reply(welcomeMessage);
+/list
+/done <id>
+/delete <id>`);
 });
 
 bot.help((ctx) => {
-  const helpMessage = `🤖 Ayuda del Bot de Recordatorios
+  ctx.reply(`🤖 Ayuda
 
-📝 Uso básico:
-Escribe tu recordatorio en lenguaje natural y yo detectaré cuándo quieres que te lo recuerde.
+/list
+/done <id>
+/delete <id>
 
-💡 Ejemplos:
-• "mañana a las 10 llamar a Juan"
-• "en 3 horas revisar correo"
-• "el lunes a las 9 reunión"
-• "pasado mañana comprar leche"
-• "el 15 de marzo pagar impuestos"
-
-⌚ Formatos de tiempo soportados:
-• Fechas específicas: "mañana", "el viernes", "el 15 de marzo"
-• Horas: "a las 10", "a las 14:30"
-• Relativo: "en 2 horas", "en 30 minutos"
-
-📋 Comandos:
-/list - Ver recordatorios pendientes
-/done <id> - Marcar como completado
-/delete <id> - Eliminar recordatorio
-/help - Mostrar esta ayuda
-
-🌍 Zona horaria: Argentina (Buenos Aires)`;
-
-  ctx.reply(helpMessage);
+Zona horaria Argentina`);
 });
 
 bot.command('list', async (ctx) => {
-  try {
-    const userId = ctx.from.id;
-    const reminders = await db.getReminders(userId, 'pendiente');
+  const reminders = await db.getReminders(ctx.from.id, 'pendiente');
 
-    if (reminders.length === 0) {
-      return ctx.reply('📭 No tienes recordatorios pendientes.');
-    }
+  if (!reminders.length) return ctx.reply('📭 No tienes recordatorios.');
 
-    let message = '📋 Tus recordatorios pendientes:\n\n';
+  let msg = '📋 Pendientes:\n\n';
 
-    reminders.forEach((reminder) => {
-      const formattedDate = formatDate(reminder.fecha);
-      const relativeTime = getRelativeTimeText(reminder.fecha);
-      message += `🔔 ID: ${reminder.id}\n`;
-      message += `   ${reminder.texto}\n`;
-      message += `   📅 ${formattedDate} (${relativeTime})\n\n`;
-    });
+  reminders.forEach(r => {
+    msg += `🆔 ${r.id}\n${r.texto}\n📅 ${formatDate(r.fecha)}\n\n`;
+  });
 
-    message += '\n💡 Usa /done <id> para completar o /delete <id> para eliminar';
-
-    ctx.reply(message);
-  } catch (error) {
-    console.error('Error al listar recordatorios:', error);
-    ctx.reply('❌ Error al obtener tus recordatorios. Intenta de nuevo.');
-  }
+  ctx.reply(msg);
 });
 
 bot.command('done', async (ctx) => {
-  try {
-    const args = ctx.message.text.split(' ');
+  const id = parseInt(ctx.message.text.split(' ')[1]);
+  if (!id) return ctx.reply('Uso: /done <id>');
 
-    if (args.length < 2) {
-      return ctx.reply('❌ Uso: /done <id>\n\nEjemplo: /done 5');
-    }
-
-    const id = parseInt(args[1]);
-
-    if (isNaN(id)) {
-      return ctx.reply('❌ El ID debe ser un número. Usa /list para ver tus recordatorios.');
-    }
-
-    const userId = ctx.from.id;
-    const success = await db.markAsDone(id, userId);
-
-    if (success) {
-      ctx.reply('✅ Recordatorio marcado como completado');
-    } else {
-      ctx.reply('❌ No se encontró ese recordatorio o no te pertenece.');
-    }
-  } catch (error) {
-    console.error('Error al marcar como completado:', error);
-    ctx.reply('❌ Error al completar el recordatorio. Intenta de nuevo.');
-  }
+  const ok = await db.markAsDone(id, ctx.from.id);
+  ctx.reply(ok ? '✅ Listo' : '❌ No encontrado');
 });
 
 bot.command('delete', async (ctx) => {
-  try {
-    const args = ctx.message.text.split(' ');
+  const id = parseInt(ctx.message.text.split(' ')[1]);
+  if (!id) return ctx.reply('Uso: /delete <id>');
 
-    if (args.length < 2) {
-      return ctx.reply('❌ Uso: /delete <id>\n\nEjemplo: /delete 5');
-    }
-
-    const id = parseInt(args[1]);
-
-    if (isNaN(id)) {
-      return ctx.reply('❌ El ID debe ser un número. Usa /list para ver tus recordatorios.');
-    }
-
-    const userId = ctx.from.id;
-    const success = await db.deleteReminder(id, userId);
-
-    if (success) {
-      ctx.reply('🗑️ Recordatorio eliminado');
-    } else {
-      ctx.reply('❌ No se encontró ese recordatorio o no te pertenece.');
-    }
-  } catch (error) {
-    console.error('Error al eliminar:', error);
-    ctx.reply('❌ Error al eliminar el recordatorio. Intenta de nuevo.');
-  }
+  const ok = await db.deleteReminder(id, ctx.from.id);
+  ctx.reply(ok ? '🗑 Eliminado' : '❌ No encontrado');
 });
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
 
-  if (text.startsWith('/')) {
-    return;
-  }
+  if (text.startsWith('/')) return;
 
-  try {
-    const userId = ctx.from.id;
-    const parseResult = parseNaturalDate(text);
+  const parsed = parseNaturalDate(text);
 
-    if (!parseResult || !parseResult.date) {
-      return ctx.reply('🤔 No entendí cuándo recordarte esto.\n\n💡 Prueba con frases como:\n• "mañana a las 10 llamar a Juan"\n• "en 2 horas revisar correo"\n• "el viernes pagar alquiler"');
-    }
+  if (!parsed) return ctx.reply('No entendí cuándo ⏰');
 
-    const { date, matchedText } = parseResult;
-    const reminderText = extractReminderText(text, matchedText);
+  const reminderText = extractReminderText(text, parsed.matchedText);
+  const date = moment(parsed.date).tz(TIMEZONE);
 
-    if (!reminderText) {
-      return ctx.reply('🤔 No entendí qué quieres que te recuerde.\n\n💡 Escribe algo como: "mañana a las 10 llamar a Juan"');
-    }
+  if (date.isBefore(moment())) return ctx.reply('Fecha pasada ❌');
 
-    const now = moment.tz(TIMEZONE);
-    const reminderDate = moment(date).tz(TIMEZONE);
+  const id = await db.createReminder(
+    ctx.from.id,
+    reminderText,
+    date.format('YYYY-MM-DD HH:mm:ss')
+  );
 
-    if (reminderDate.isBefore(now)) {
-      return ctx.reply('⏰ Esa fecha ya pasó. Por favor, indica una fecha futura.');
-    }
-
-    const isDuplicate = await db.checkDuplicate(
-      userId,
-      reminderText,
-      reminderDate.format('YYYY-MM-DD HH:mm:ss')
-    );
-
-    if (isDuplicate) {
-      return ctx.reply('⚠️ Ya tienes un recordatorio idéntico programado para esa fecha.');
-    }
-
-    const reminderId = await db.createReminder(
-      userId,
-      reminderText,
-      reminderDate.format('YYYY-MM-DD HH:mm:ss')
-    );
-
-    const relativeTime = getRelativeTimeText(date);
-    const formattedDate = formatDate(date);
-
-    ctx.reply(
-      `✅ Recordatorio creado\n\n` +
-      `📝 ${reminderText}\n` +
-      `⏰ Te avisaré ${relativeTime}\n` +
-      `📅 ${formattedDate}\n\n` +
-      `🆔 ID: ${reminderId}`
-    );
-
-  } catch (error) {
-    console.error('Error al procesar mensaje:', error);
-    ctx.reply('❌ Ocurrió un error al crear el recordatorio. Intenta de nuevo.');
-  }
+  ctx.reply(`✅ Guardado\n${reminderText}\n${formatDate(date)}\nID ${id}`);
 });
 
+// -------- CRON --------
+
 async function checkReminders() {
-  try {
-    const dueReminders = await db.getDueReminders();
+  const due = await db.getDueReminders();
 
-    for (const reminder of dueReminders) {
-      try {
-        await bot.telegram.sendMessage(
-          reminder.user_id,
-          `⏰ *Recordatorio*\n\n${reminder.texto}`,
-          { parse_mode: 'Markdown' }
-        );
-
-        await db.markAsSent(reminder.id);
-        console.log(`✅ Recordatorio ${reminder.id} enviado a usuario ${reminder.user_id}`);
-      } catch (error) {
-        console.error(`Error al enviar recordatorio ${reminder.id}:`, error);
-      }
-    }
-  } catch (error) {
-    console.error('Error al revisar recordatorios:', error);
+  for (const r of due) {
+    await bot.telegram.sendMessage(r.user_id, `⏰ ${r.texto}`);
+    await db.markAsSent(r.id);
   }
 }
 
-cron.schedule('* * * * *', () => {
-  checkReminders();
-});
+cron.schedule('* * * * *', checkReminders);
 
-bot.catch((err, ctx) => {
-  console.error('Error en el bot:', err);
-  ctx.reply('❌ Ocurrió un error inesperado. Por favor, intenta de nuevo.');
-});
+// -------- START --------
 
-bot.launch({
-  polling: {
-    timeout: 30,
-    limit: 100
-  }
-}).then(() => {
-  console.log('🤖 Bot iniciado correctamente');
-  console.log(`⏰ Zona horaria: ${TIMEZONE}`);
-  console.log('📡 Modo: Polling');
-  console.log('✅ Listo para recibir mensajes');
-});
+bot.launch();
 
-process.once('SIGINT', () => {
-  bot.stop('SIGINT');
-  db.close();
-});
-
-process.once('SIGTERM', () => {
-  bot.stop('SIGTERM');
-  db.close();
-});
+process.once('SIGINT', () => bot.stop());
+process.once('SIGTERM', () => bot.stop());
