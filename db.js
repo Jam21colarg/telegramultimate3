@@ -5,7 +5,7 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(DB_PATH, (err) => {
+    this.db = new sqlite3.Database(DB_PATH, err => {
       if (err) console.error('❌ Error DB:', err);
       else console.log('✅ Base de datos SQLite conectada');
       this.init();
@@ -24,7 +24,7 @@ class Database {
         tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `, () => console.log('✅ Tabla reminders lista'));
+    `);
 
     // -------- TABLA NOTES --------
     this.db.run(`
@@ -35,7 +35,9 @@ class Database {
         tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `, () => console.log('✅ Tabla notes lista'));
+    `);
+
+    console.log('✅ Tablas listas y columnas tags aseguradas');
   }
 
   // ---------- REMINDERS ----------
@@ -135,11 +137,10 @@ class Database {
     });
   }
 
-  // Cierra la DB (opcional)
   close() {
     this.db.close(err => {
       if (err) console.error('❌ Error cerrando DB:', err);
-      else console.log('Base de datos cerrada');
+      else console.log('✅ Base de datos cerrada');
     });
   }
 }
