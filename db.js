@@ -5,15 +5,19 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(DB_PATH, err => {
-      if (err) console.error('❌ Error DB:', err);
-      else console.log('✅ Base de datos SQLite conectada');
+    this.db = new sqlite3.Database(DB_PATH, (err) => {
+      if (err) {
+        console.error('❌ Error al conectar DB:', err);
+        return;
+      }
+      console.log('✅ Base de datos SQLite conectada');
       this.init();
     });
   }
 
+  // ================= INICIALIZACIÓN =================
   init() {
-    // -------- TABLA REMINDERS --------
+    // Tabla de recordatorios
     this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +30,7 @@ class Database {
       )
     `);
 
-    // -------- TABLA NOTES --------
+    // Tabla de notas
     this.db.run(`
       CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,15 +44,19 @@ class Database {
     console.log('✅ Tablas listas y columnas tags aseguradas');
   }
 
-  // ---------- REMINDERS ----------
+  // ================= REMINDERS =================
+
   createReminder(user_id, texto, fecha, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
         `INSERT INTO reminders (user_id, texto, fecha, tags) VALUES (?,?,?,?)`,
         [user_id, texto, fecha, tags],
         function(err) {
-          if (err) reject(err);
-          else resolve(this.lastID);
+          if (err) {
+            console.error('❌ Error creando recordatorio:', err);
+            return reject(err);
+          }
+          resolve(this.lastID);
         }
       );
     });
@@ -80,8 +88,8 @@ class Database {
         `UPDATE reminders SET estado='enviado' WHERE id=?`,
         [id],
         function(err) {
-          if (err) reject(err);
-          else resolve(this.changes > 0);
+          if (err) return reject(err);
+          resolve(this.changes > 0);
         }
       );
     });
@@ -93,8 +101,8 @@ class Database {
         `UPDATE reminders SET estado='completado' WHERE id=? AND user_id=?`,
         [id, user_id],
         function(err) {
-          if (err) reject(err);
-          else resolve(this.changes > 0);
+          if (err) return reject(err);
+          resolve(this.changes > 0);
         }
       );
     });
@@ -106,22 +114,23 @@ class Database {
         `DELETE FROM reminders WHERE id=? AND user_id=?`,
         [id, user_id],
         function(err) {
-          if (err) reject(err);
-          else resolve(this.changes > 0);
+          if (err) return reject(err);
+          resolve(this.changes > 0);
         }
       );
     });
   }
 
-  // ---------- NOTES ----------
+  // ================= NOTES =================
+
   createNote(user_id, texto, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
         `INSERT INTO notes (user_id, texto, tags) VALUES (?,?,?)`,
         [user_id, texto, tags],
         function(err) {
-          if (err) reject(err);
-          else resolve(this.lastID);
+          if (err) return reject(err);
+          resolve(this.lastID);
         }
       );
     });
@@ -137,10 +146,11 @@ class Database {
     });
   }
 
+  // ================= CIERRE DE DB =================
   close() {
-    this.db.close(err => {
+    this.db.close((err) => {
       if (err) console.error('❌ Error cerrando DB:', err);
-      else console.log('✅ Base de datos cerrada');
+      else console.log('Base de datos cerrada');
     });
   }
 }
