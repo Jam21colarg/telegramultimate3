@@ -4,7 +4,7 @@ Bot profesional tipo Toki/Dola que entiende lenguaje natural en español para cr
 
 ## Características
 
-- **Lenguaje Natural**: Escribe tus recordatorios como hablas normalmente
+- **Lenguaje Natural**: Escribe tus recordatorios como hablas normalmente con alguien
 - **Detección de Fechas**: Parseo inteligente de fechas y horas en español usando chrono-node
 - **Notificaciones Automáticas**: Envía recordatorios en el momento exacto
 - **Multiusuario**: Cada usuario tiene sus propios recordatorios
