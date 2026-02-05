@@ -9,6 +9,8 @@ const { Configuration, OpenAIApi } = require('openai');
 // ================= CONFIGURACIÓN =================
 const TIMEZONE = process.env.TIMEZONE || 'America/Argentina/Buenos_Aires';
 const OPENAI_KEY = process.env.OPENAI_KEY;
+const PORT = process.env.PORT || 8080;
+const DOMAIN = process.env.RAILWAY_STATIC_URL || process.env.DOMAIN; // dominio público Railway o custom
 
 const aiClient = OPENAI_KEY
   ? new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }))
@@ -17,25 +19,10 @@ const aiClient = OPENAI_KEY
 // ================= HTTP =================
 const app = express();
 app.get('/', (_, res) => res.send('Bot online 🚀'));
-const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🌐 HTTP escuchando en ${PORT}`));
 
 // ================= BOT =================
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
-bot.launch()
-  .then(() => console.log('🤖 Bot iniciado correctamente'))
-  .catch(err => console.error('❌ Error iniciando bot:', err));
-
-// ================= HELPERS =================
-function extractTags(text) {
-  const matches = text.match(/#[\w]+/g);
-  return matches ? matches.join(',') : '';
-}
-
-function cleanText(text) {
-  return text.replace(/#[\w]+/g, '').trim();
-}
 
 // ================= IA PARSER =================
 async function parseReminderWithAI(message) {
@@ -94,6 +81,16 @@ async function testAI() {
 
 // Ejecutamos la prueba al inicio
 testAI();
+
+// ================= HELPERS =================
+function extractTags(text) {
+  const matches = text.match(/#[\w]+/g);
+  return matches ? matches.join(',') : '';
+}
+
+function cleanText(text) {
+  return text.replace(/#[\w]+/g, '').trim();
+}
 
 // ================= COMANDOS =================
 bot.start(ctx =>
@@ -182,3 +179,17 @@ cron.schedule('* * * * *', async () => {
     await db.markAsSent(r.id);
   }
 });
+
+// ================= LANZAMIENTO CON WEBHOOK =================
+if (DOMAIN) {
+  bot.launch({
+    webhook: {
+      domain: DOMAIN,
+      port: PORT
+    }
+  }).then(() => console.log('🤖 Bot iniciado en Webhook'))
+    .catch(err => console.error('❌ Error iniciando bot en webhook:', err));
+} else {
+  // fallback a polling si no hay dominio definido
+  bot.launch().then(() => console.log('🤖 Bot iniciado con polling'));
+}
