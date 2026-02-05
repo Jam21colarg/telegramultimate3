@@ -15,19 +15,16 @@ const aiClient = OPENAI_KEY
   : null;
 
 // ---------- HTTP ----------
-
 const app = express();
 app.get('/', (_, res) => res.send('Bot online 🚀'));
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🌐 HTTP escuchando en ${PORT}`));
 
 // ---------- BOT ----------
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 bot.launch().then(() => console.log('🤖 Bot iniciado correctamente'));
 
 // ---------- HELPERS ----------
-
 function extractTags(text) {
   const matches = text.match(/#[\w]+/g);
   return matches ? matches.join(',') : '';
@@ -37,8 +34,15 @@ function cleanText(text) {
   return text.replace(/#[\w]+/g, '').trim();
 }
 
-// ---------- IA PARSER ----------
+const chrono = require('chrono-node');
+function parseDate(text) {
+  const now = moment.tz(TIMEZONE).toDate();
+  const results = chrono.es.parse(text, now, { forwardDate: true });
+  if (!results.length) return null;
+  return results[0];
+}
 
+// ---------- IA PARSER ----------
 async function parseReminderWithAI(message) {
   if (!aiClient) return null;
 
@@ -64,7 +68,6 @@ Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
     });
 
     const content = response.data.choices[0].message.content;
-    // Intentamos parsear JSON
     const json = content.includes('{') ? JSON.parse(content.match(/\{[\s\S]*\}/)[0]) : null;
     return json;
   } catch (err) {
@@ -74,7 +77,6 @@ Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
 }
 
 // ---------- COMANDOS ----------
-
 bot.start(ctx =>
   ctx.reply(`Hola 👋
 
@@ -125,7 +127,6 @@ bot.command('delete', async ctx => {
 });
 
 // ---------- MENSAJES ----------
-
 bot.on('text', async ctx => {
   const text = ctx.message.text;
   if (text.startsWith('/')) return;
@@ -134,27 +135,53 @@ bot.on('text', async ctx => {
   if (text.toLowerCase().startsWith('nota ')) {
     const raw = text.slice(5);
     await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
+    console.log(`🗒 Nota guardada para usuario ${ctx.from.id}:`, cleanText(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
   // ---- RECORDATORIOS ----
-  const aiResult = await parseReminderWithAI(text);
-  if (!aiResult || !aiResult.date || !aiResult.texto) {
-    return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
+  let aiResult = null;
+  if (aiClient) {
+    try {
+      aiResult = await parseReminderWithAI(text);
+      if (aiResult) console.log('🤖 IA activada, resultado:', aiResult);
+      else console.log('⚠️ IA no pudo procesar el mensaje, usando fallback');
+    } catch (err) {
+      console.error('❌ Error llamando a la IA:', err);
+    }
+  } else {
+    console.log('⚠️ IA desactivada, no se procesará el mensaje con IA');
   }
 
-  const id = await db.createReminder(
-    ctx.from.id,
-    aiResult.texto,
-    aiResult.date,
-    aiResult.tags
-  );
+  // ---- Fallback simple si IA no responde ----
+  if (!aiResult || !aiResult.date || !aiResult.texto) {
+    const parsed = parseDate(text);
+    if (!parsed) return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
+    aiResult = {
+      date: moment(parsed.start.date()).tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss'),
+      texto: cleanText(text.replace(parsed.text, '')),
+      tags: extractTags(text)
+    };
+    console.log('🔄 Fallback parser activado, resultado:', aiResult);
+  }
 
-  ctx.reply(`⏰ ${aiResult.texto}\n📅 ${moment(aiResult.date).tz(TIMEZONE).format('DD/MM HH:mm')}\nID ${id}`);
+  // ---- Guardar en DB ----
+  try {
+    const id = await db.createReminder(
+      ctx.from.id,
+      aiResult.texto,
+      aiResult.date,
+      aiResult.tags
+    );
+    ctx.reply(`⏰ ${aiResult.texto}\n📅 ${moment(aiResult.date).tz(TIMEZONE).format('DD/MM HH:mm')}\nID ${id}`);
+    console.log(`✅ Recordatorio creado para usuario ${ctx.from.id} con ID ${id}`);
+  } catch (err) {
+    console.error('❌ Error guardando recordatorio en DB:', err);
+    ctx.reply('❌ Ocurrió un error al guardar el recordatorio.');
+  }
 });
 
 // ---------- CRON RECORDATORIOS ----------
-
 cron.schedule('* * * * *', async () => {
   const due = await db.getDueReminders();
   for (const r of due) {
