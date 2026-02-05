@@ -12,9 +12,8 @@ class Database {
     });
   }
 
-  // ---------- CREACIÓN DE TABLAS ----------
   init() {
-    // Tabla de recordatorios
+    // -------- TABLA REMINDERS --------
     this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,32 +21,45 @@ class Database {
         texto TEXT NOT NULL,
         fecha DATETIME NOT NULL,
         estado TEXT DEFAULT 'pendiente',
-        tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, () => {
+      // Aseguramos que exista la columna tags
+      this.db.run(`ALTER TABLE reminders ADD COLUMN tags TEXT`, (err) => {
+        if (err && !err.message.includes('duplicate column')) {
+          console.error('❌ Error agregando columna tags:', err);
+        }
+      });
+    });
 
-    // Tabla de notas
+    // -------- TABLA NOTES --------
     this.db.run(`
       CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         texto TEXT NOT NULL,
-        tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, () => {
+      // Aseguramos que exista la columna tags
+      this.db.run(`ALTER TABLE notes ADD COLUMN tags TEXT`, (err) => {
+        if (err && !err.message.includes('duplicate column')) {
+          console.error('❌ Error agregando columna tags en notes:', err);
+        }
+      });
+    });
 
-    console.log('✅ Tablas listas');
+    console.log('✅ Tablas listas y columnas tags aseguradas');
   }
 
   // ---------- REMINDERS ----------
+
   createReminder(user_id, texto, fecha, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
         `INSERT INTO reminders (user_id, texto, fecha, tags) VALUES (?,?,?,?)`,
         [user_id, texto, fecha, tags],
-        function (err) {
+        function(err) {
           if (err) reject(err);
           else resolve(this.lastID);
         }
@@ -80,7 +92,7 @@ class Database {
       this.db.run(
         `UPDATE reminders SET estado='enviado' WHERE id=?`,
         [id],
-        function (err) {
+        function(err) {
           if (err) reject(err);
           else resolve(this.changes > 0);
         }
@@ -93,7 +105,7 @@ class Database {
       this.db.run(
         `UPDATE reminders SET estado='completado' WHERE id=? AND user_id=?`,
         [id, user_id],
-        function (err) {
+        function(err) {
           if (err) reject(err);
           else resolve(this.changes > 0);
         }
@@ -106,7 +118,7 @@ class Database {
       this.db.run(
         `DELETE FROM reminders WHERE id=? AND user_id=?`,
         [id, user_id],
-        function (err) {
+        function(err) {
           if (err) reject(err);
           else resolve(this.changes > 0);
         }
@@ -115,12 +127,13 @@ class Database {
   }
 
   // ---------- NOTES ----------
+
   createNote(user_id, texto, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
         `INSERT INTO notes (user_id, texto, tags) VALUES (?,?,?)`,
         [user_id, texto, tags],
-        function (err) {
+        function(err) {
           if (err) reject(err);
           else resolve(this.lastID);
         }
@@ -138,9 +151,9 @@ class Database {
     });
   }
 
-  // ---------- CERRAR DB ----------
+  // ---------- CERRAR DB (opcional) ----------
   close() {
-    this.db.close(err => {
+    this.db.close((err) => {
       if (err) console.error('❌ Error cerrando DB:', err);
       else console.log('Base de datos cerrada');
     });
