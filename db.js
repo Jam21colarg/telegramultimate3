@@ -5,7 +5,7 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(DB_PATH, err => {
+    this.db = new sqlite3.Database(DB_PATH, (err) => {
       if (err) console.error('❌ Error DB:', err);
       else console.log('✅ Base de datos SQLite conectada');
       this.init();
@@ -13,7 +13,7 @@ class Database {
   }
 
   init() {
-    // TABLA REMINDERS
+    // -------- TABLA REMINDERS --------
     this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +26,7 @@ class Database {
       )
     `);
 
-    // TABLA NOTES
+    // -------- TABLA NOTES --------
     this.db.run(`
       CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +41,7 @@ class Database {
   }
 
   // ---------- REMINDERS ----------
+
   createReminder(user_id, texto, fecha, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -114,6 +115,7 @@ class Database {
   }
 
   // ---------- NOTES ----------
+
   createNote(user_id, texto, tags = '') {
     return new Promise((resolve, reject) => {
       this.db.run(
@@ -137,8 +139,9 @@ class Database {
     });
   }
 
+  // ---------- Cierra DB ----------
   close() {
-    this.db.close(err => {
+    this.db.close((err) => {
       if (err) console.error('❌ Error cerrando DB:', err);
       else console.log('✅ Base de datos cerrada');
     });
