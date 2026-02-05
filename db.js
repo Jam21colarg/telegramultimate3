@@ -16,149 +16,93 @@ class Database {
   }
 
   init() {
-    const sql = `
+    // REMINDERS
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
         texto TEXT NOT NULL,
         fecha DATETIME NOT NULL,
         estado TEXT DEFAULT 'pendiente',
+        tags TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `;
+    `);
 
-    this.db.run(sql, (err) => {
-      if (err) {
-        console.error('Error al crear tabla:', err);
-      } else {
-        console.log('✅ Tabla de recordatorios lista');
-      }
-    });
+    // NOTES
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        texto TEXT NOT NULL,
+        tags TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log('✅ Tablas listas');
   }
 
-  createReminder(userId, texto, fecha) {
-    return new Promise((resolve, reject) => {
-      const sql = `INSERT INTO reminders (user_id, texto, fecha, estado) VALUES (?, ?, ?, 'pendiente')`;
+  // ---------------- REMINDERS ----------------
 
-      this.db.run(sql, [userId, texto, fecha], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(this.lastID);
-        }
-      });
-    });
-  }
-
-  checkDuplicate(userId, texto, fecha) {
+  createReminder(userId, texto, fecha, tags = null) {
     return new Promise((resolve, reject) => {
       const sql = `
-        SELECT COUNT(*) as count
-        FROM reminders
-        WHERE user_id = ?
-        AND texto = ?
-        AND fecha = ?
-        AND estado = 'pendiente'
+        INSERT INTO reminders (user_id, texto, fecha, estado, tags)
+        VALUES (?, ?, ?, 'pendiente', ?)
       `;
 
-      this.db.get(sql, [userId, texto, fecha], (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row.count > 0);
-        }
+      this.db.run(sql, [userId, texto, fecha, tags], function (err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
       });
     });
   }
 
   getReminders(userId, estado = 'pendiente') {
     return new Promise((resolve, reject) => {
-      const sql = `
-        SELECT * FROM reminders
-        WHERE user_id = ? AND estado = ?
-        ORDER BY fecha ASC
-      `;
-
-      this.db.all(sql, [userId, estado], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      });
+      this.db.all(
+        `SELECT * FROM reminders WHERE user_id = ? AND estado = ? ORDER BY fecha ASC`,
+        [userId, estado],
+        (err, rows) => err ? reject(err) : resolve(rows)
+      );
     });
   }
 
   getDueReminders() {
     return new Promise((resolve, reject) => {
-      const sql = `
-        SELECT * FROM reminders
-        WHERE estado = 'pendiente'
-        AND fecha <= datetime('now')
-        ORDER BY fecha ASC
-      `;
-
-      this.db.all(sql, [], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      });
+      this.db.all(
+        `SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= datetime('now')`,
+        [],
+        (err, rows) => err ? reject(err) : resolve(rows)
+      );
     });
   }
 
   markAsSent(id) {
-    return new Promise((resolve, reject) => {
-      const sql = `UPDATE reminders SET estado = 'enviado' WHERE id = ?`;
-
-      this.db.run(sql, [id], (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
+    return this.run(`UPDATE reminders SET estado='enviado' WHERE id=?`, [id]);
   }
 
   markAsDone(id, userId) {
     return new Promise((resolve, reject) => {
-      const sql = `UPDATE reminders SET estado = 'completado' WHERE id = ? AND user_id = ?`;
-
-      this.db.run(sql, [id, userId], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(this.changes > 0);
+      this.db.run(
+        `UPDATE reminders SET estado='completado' WHERE id=? AND user_id=?`,
+        [id, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes > 0);
         }
-      });
+      );
     });
   }
 
   deleteReminder(id, userId) {
     return new Promise((resolve, reject) => {
-      const sql = `DELETE FROM reminders WHERE id = ? AND user_id = ?`;
-
-      this.db.run(sql, [id, userId], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(this.changes > 0);
+      this.db.run(
+        `DELETE FROM reminders WHERE id=? AND user_id=?`,
+        [id, userId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes > 0);
         }
-      });
-    });
-  }
-
-  close() {
-    this.db.close((err) => {
-      if (err) {
-        console.error('Error al cerrar base de datos:', err);
-      } else {
-        console.log('Base de datos cerrada');
-      }
-    });
-  }
-}
-
-module.exports = new Database();
+      );
