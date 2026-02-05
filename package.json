@@ -1,22 +1,22 @@
 {
   "name": "telegram-reminder-bot",
   "version": "1.0.0",
-  "description": "Bot de Telegram para recordatorios y notas con integración opcional de OpenAI",
+  "description": "Bot de recordatorios y notas con integración OpenAI",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": "20.x"
   },
   "dependencies": {
-    "telegraf": "^4.18.1",
-    "sqlite3": "^5.1.6",
+    "telegraf": "4.17.3",
+    "express": "^4.18.2",
     "moment-timezone": "^0.5.43",
     "chrono-node": "^2.3.2",
-    "express": "^4.18.2",
-    "openai": "^4.35.0",
+    "node-cron": "^3.0.2",
     "dotenv": "^16.3.1",
-    "node-cron": "^3.0.2"
+    "openai": "^4.12.0"
   }
 }
