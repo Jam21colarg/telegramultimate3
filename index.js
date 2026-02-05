@@ -10,18 +10,28 @@ const { Configuration, OpenAIApi } = require('openai');
 const TIMEZONE = process.env.TIMEZONE || 'America/Argentina/Buenos_Aires';
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const PORT = process.env.PORT || 8080;
-const DOMAIN = process.env.RAILWAY_STATIC_URL || process.env.DOMAIN; // dominio público Railway o custom
+// En Railway, RAILWAY_STATIC_URL ya incluye el dominio, pero necesitamos asegurar que tenga https://
+let DOMAIN = process.env.RAILWAY_STATIC_URL || process.env.DOMAIN;
+if (DOMAIN && !DOMAIN.startsWith('http')) {
+    DOMAIN = `https://${DOMAIN}`;
+}
 
 const aiClient = OPENAI_KEY
   ? new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }))
   : null;
 
-// ================= HTTP =================
+// ================= SERVIDOR EXPRESS =================
 const app = express();
-app.get('/', (_, res) => res.send('Bot online 🚀'));
-app.listen(PORT, () => console.log(`🌐 HTTP escuchando en ${PORT}`));
+app.use(express.json()); // Necesario para procesar webhooks
 
-// ================= BOT =================
+app.get('/', (_, res) => res.send('Bot online 🚀'));
+
+// El servidor de Express escucha primero
+app.listen(PORT, () => {
+    console.log(`🌐 Servidor HTTP escuchando en el puerto ${PORT}`);
+});
+
+// ================= BOT CONFIG =================
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // ================= IA PARSER =================
@@ -57,30 +67,6 @@ Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
     return null;
   }
 }
-
-// ================= PRUEBA DE IA =================
-async function testAI() {
-  if (!aiClient) {
-    console.log('⚠️ IA no disponible: revisa tu OPENAI_KEY');
-    return;
-  }
-
-  try {
-    const response = await aiClient.createChatCompletion({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: 'Di solo "IA lista" si estás funcionando' }],
-      temperature: 0
-    });
-
-    const content = response.data.choices[0].message.content;
-    console.log('🤖 IA funciona correctamente. Respuesta de prueba:', content);
-  } catch (err) {
-    console.error('❌ Error probando IA:', err.message || err);
-  }
-}
-
-// Ejecutamos la prueba al inicio
-testAI();
 
 // ================= HELPERS =================
 function extractTags(text) {
@@ -147,14 +133,12 @@ bot.on('text', async ctx => {
   const text = ctx.message.text;
   if (text.startsWith('/')) return;
 
-  // ---- NOTAS ----
   if (text.toLowerCase().startsWith('nota ')) {
     const raw = text.slice(5);
     await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
-  // ---- RECORDATORIOS ----
   const aiResult = await parseReminderWithAI(text);
 
   if (!aiResult || !aiResult.date || !aiResult.texto) {
@@ -180,16 +164,30 @@ cron.schedule('* * * * *', async () => {
   }
 });
 
-// ================= LANZAMIENTO CON WEBHOOK =================
+// ================= LANZAMIENTO INTEGRADO =================
 if (DOMAIN) {
-  bot.launch({
-    webhook: {
-      domain: DOMAIN,
-      port: PORT
-    }
-  }).then(() => console.log('🤖 Bot iniciado en Webhook'))
-    .catch(err => console.error('❌ Error iniciando bot en webhook:', err));
+  const secretPath = `/telegraf/${bot.secretPathComponent()}`;
+  
+  // 1. Configurar el Webhook en Telegram
+  bot.telegram.setWebhook(`${DOMAIN}${secretPath}`)
+    .then(() => {
+        console.log(`🤖 Webhook configurado en: ${DOMAIN}${secretPath}`);
+    });
+
+  // 2. Usar el middleware de Telegraf en Express
+  app.use(bot.webhookCallback(secretPath));
+
 } else {
-  // fallback a polling si no hay dominio definido
-  bot.launch().then(() => console.log('🤖 Bot iniciado con polling'));
+  // Fallback para desarrollo local
+  bot.launch().then(() => console.log('🤖 Bot iniciado con Long Polling (Local)'));
 }
+
+// ================= MANEJO DE CIERRE =================
+process.once('SIGINT', () => {
+    console.log('Cerrando bot (SIGINT)...');
+    bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    console.log('Cerrando bot (SIGTERM)...');
+    bot.stop('SIGTERM');
+});
