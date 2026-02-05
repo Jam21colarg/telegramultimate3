@@ -5,14 +5,10 @@ const DB_PATH = path.join(__dirname, 'reminders.db');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(DB_PATH, () => {
-      this.db.serialize();
-      this.init();
-    });
+    this.db = new sqlite3.Database(DB_PATH, () => this.init());
   }
 
   init() {
-    // REMINDERS
     this.db.run(`
       CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,7 +21,6 @@ class Database {
       )
     `);
 
-    // NOTES
     this.db.run(`
       CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,12 +31,12 @@ class Database {
       )
     `);
 
-    console.log("✅ Tablas listas");
+    console.log('✅ Tablas listas');
   }
 
-  // -------- REMINDERS --------
+  // ---------- REMINDERS ----------
 
-  createReminder(user, text, date, tags = "") {
+  createReminder(user, text, date, tags = '') {
     return new Promise(resolve => {
       this.db.run(
         `INSERT INTO reminders (user_id,texto,fecha,tags) VALUES (?,?,?,?)`,
@@ -49,6 +44,16 @@ class Database {
         function () {
           resolve(this.lastID);
         }
+      );
+    });
+  }
+
+  getReminders(user) {
+    return new Promise(resolve => {
+      this.db.all(
+        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente'`,
+        [user],
+        (_, rows) => resolve(rows)
       );
     });
   }
@@ -67,24 +72,13 @@ class Database {
     this.db.run(`UPDATE reminders SET estado='enviado' WHERE id=?`, [id]);
   }
 
-  getReminders(user) {
-    return new Promise(resolve => {
-      this.db.all(
-        `SELECT * FROM reminders WHERE user_id=? AND estado='pendiente' ORDER BY fecha ASC`,
-        [user],
-        (_, rows) => resolve(rows)
-      );
-    });
-  }
-
   markAsDone(id, user) {
     return new Promise(resolve => {
       this.db.run(
         `UPDATE reminders SET estado='completado' WHERE id=? AND user_id=?`,
         [id, user],
         function () {
-          resolve resolve = this.changes > 0;
-          resolve(resolve);
+          resolve(this.changes > 0);
         }
       );
     });
@@ -102,9 +96,9 @@ class Database {
     });
   }
 
-  // -------- NOTES --------
+  // ---------- NOTES ----------
 
-  createNote(user, text, tags = "") {
+  createNote(user, text, tags) {
     return new Promise(resolve => {
       this.db.run(
         `INSERT INTO notes (user_id,texto,tags) VALUES (?,?,?)`,
