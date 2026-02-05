@@ -6,10 +6,11 @@ const moment = require('moment-timezone');
 const db = require('./db');
 const { Configuration, OpenAIApi } = require('openai');
 
-const TIMEZONE = 'America/Argentina/Buenos_Aires';
+const TIMEZONE = process.env.TIMEZONE || 'America/Argentina/Buenos_Aires';
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-// Configuración de OpenAI
+// Configuración OpenAI
 const aiClient = OPENAI_KEY
   ? new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }))
   : null;
@@ -21,7 +22,7 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🌐 HTTP escuchando en ${PORT}`));
 
 // ---------- BOT ----------
-const bot = new Telegraf(process.env.BOT_TOKEN);
+const bot = new Telegraf(BOT_TOKEN);
 bot.launch().then(() => console.log('🤖 Bot iniciado correctamente'));
 
 // ---------- HELPERS ----------
@@ -34,30 +35,20 @@ function cleanText(text) {
   return text.replace(/#[\w]+/g, '').trim();
 }
 
-const chrono = require('chrono-node');
-function parseDate(text) {
-  const now = moment.tz(TIMEZONE).toDate();
-  const results = chrono.es.parse(text, now, { forwardDate: true });
-  if (!results.length) return null;
-  return results[0];
-}
-
 // ---------- IA PARSER ----------
 async function parseReminderWithAI(message) {
   if (!aiClient) return null;
 
   const prompt = `
-Recibí un mensaje de un usuario que puede contener un recordatorio.
-Analiza el texto y extrae:
-
-1. La fecha y hora exacta en formato "YYYY-MM-DD HH:mm" (hora local de Buenos Aires).
-2. El texto del recordatorio.
-3. Las etiquetas si hay (como #trabajo, #estudio) separadas por coma.
-
+Recibí un mensaje que puede contener un recordatorio.
+Extrae:
+1. Fecha y hora exacta en formato "YYYY-MM-DD HH:mm" (hora de Buenos Aires).
+2. Texto del recordatorio.
+3. Tags si hay (como #trabajo, #estudio) separados por coma.
 Si no es un recordatorio, responde "NO".
 
 Mensaje: """${message}"""
-Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
+Formato JSON: { "date": "...", "texto": "...", "tags": "..." }
 `;
 
   try {
@@ -79,7 +70,6 @@ Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
 // ---------- COMANDOS ----------
 bot.start(ctx =>
   ctx.reply(`Hola 👋
-
 Ejemplos:
 mañana llamar a Juan
 nota comprar pintura #trabajo
@@ -95,6 +85,7 @@ el próximo lunes ir a la universidad a las 8am #estudio
 bot.command('list', async ctx => {
   const reminders = await db.getReminders(ctx.from.id);
   if (!reminders.length) return ctx.reply('📭 Vacío');
+
   let msg = '';
   reminders.forEach(r => {
     msg += `🆔 ${r.id}\n${r.texto}\n📅 ${moment(r.fecha).tz(TIMEZONE).format('DD/MM HH:mm')}\n\n`;
@@ -105,6 +96,7 @@ bot.command('list', async ctx => {
 bot.command('notes', async ctx => {
   const notes = await db.getNotes(ctx.from.id);
   if (!notes.length) return ctx.reply('🗒 No hay notas');
+
   let msg = '';
   notes.forEach(n => {
     msg += `• ${n.texto}`;
@@ -135,49 +127,25 @@ bot.on('text', async ctx => {
   if (text.toLowerCase().startsWith('nota ')) {
     const raw = text.slice(5);
     await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
-    console.log(`🗒 Nota guardada para usuario ${ctx.from.id}:`, cleanText(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
   // ---- RECORDATORIOS ----
-  let aiResult = null;
-  if (aiClient) {
-    try {
-      aiResult = await parseReminderWithAI(text);
-      if (aiResult) console.log('🤖 IA activada, resultado:', aiResult);
-      else console.log('⚠️ IA no pudo procesar el mensaje, usando fallback');
-    } catch (err) {
-      console.error('❌ Error llamando a la IA:', err);
-    }
-  } else {
-    console.log('⚠️ IA desactivada, no se procesará el mensaje con IA');
-  }
-
-  // ---- Fallback simple si IA no responde ----
+  const aiResult = await parseReminderWithAI(text);
   if (!aiResult || !aiResult.date || !aiResult.texto) {
-    const parsed = parseDate(text);
-    if (!parsed) return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
-    aiResult = {
-      date: moment(parsed.start.date()).tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss'),
-      texto: cleanText(text.replace(parsed.text, '')),
-      tags: extractTags(text)
-    };
-    console.log('🔄 Fallback parser activado, resultado:', aiResult);
+    return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
   }
 
-  // ---- Guardar en DB ----
+  // Formato seguro
+  const fecha = moment(aiResult.date).tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss');
+  const tags = aiResult.tags ? aiResult.tags : '';
+
   try {
-    const id = await db.createReminder(
-      ctx.from.id,
-      aiResult.texto,
-      aiResult.date,
-      aiResult.tags
-    );
-    ctx.reply(`⏰ ${aiResult.texto}\n📅 ${moment(aiResult.date).tz(TIMEZONE).format('DD/MM HH:mm')}\nID ${id}`);
-    console.log(`✅ Recordatorio creado para usuario ${ctx.from.id} con ID ${id}`);
+    const id = await db.createReminder(ctx.from.id, aiResult.texto, fecha, tags);
+    ctx.reply(`⏰ ${aiResult.texto}\n📅 ${moment(fecha).tz(TIMEZONE).format('DD/MM HH:mm')}\nID ${id}`);
   } catch (err) {
-    console.error('❌ Error guardando recordatorio en DB:', err);
-    ctx.reply('❌ Ocurrió un error al guardar el recordatorio.');
+    console.error('❌ Error guardando recordatorio:', err);
+    ctx.reply('❌ Ocurrió un error guardando el recordatorio.');
   }
 });
 
