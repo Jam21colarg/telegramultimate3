@@ -134,11 +134,25 @@ bot.on('text', async ctx => {
 // ---------- CRON ----------
 
 cron.schedule('* * * * *', async () => {
-  const due = await db.getDueReminders();
-  for (const r of due) {
-    await bot.telegram.sendMessage(r.user_id, `⏰ ${r.texto}`);
-    await db.markAsSent(r.id);
+  try {
+    const due = await db.getDueReminders();
+
+    for (const r of due) {
+      await bot.telegram.sendMessage(r.user_id, `⏰ ${r.texto}`);
+      await db.markAsSent(r.id);
+    }
+  } catch (e) {
+    console.log("CRON ERROR:", e);
   }
 });
 
-bot.launch();
+// ---------- START BOT ----------
+
+bot.launch({ dropPendingUpdates: true })
+  .then(() => console.log("🤖 Bot iniciado correctamente"))
+  .catch(err => console.log("BOT ERROR:", err));
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+console.log("🚀 App completa levantada");
