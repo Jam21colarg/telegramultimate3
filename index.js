@@ -13,7 +13,7 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 // ---------- HTTP ----------
 
 const app = express();
-app.get('/', (_, res) => res.send('Bot online'));
+app.get('/', (_, res) => res.send('Bot online ✅'));
 app.listen(process.env.PORT || 8080);
 
 // ---------- HELPERS ----------
@@ -45,6 +45,7 @@ bot.start(ctx =>
 
 Ejemplos:
 mañana llamar a Juan
+recordar mañana pagar alquiler
 nota comprar pintura #trabajo
 
 /list
@@ -55,11 +56,11 @@ nota comprar pintura #trabajo
 
 bot.command('list', async ctx => {
   const rows = await db.getReminders(ctx.from.id);
-  if (!rows.length) return ctx.reply('Vacío');
+  if (!rows.length) return ctx.reply('📭 Vacío');
 
   let m = '';
   rows.forEach(r => {
-    m += `🆔 ${r.id}\n${r.texto}\n${format(r.fecha)}\n\n`;
+    m += `🆔 ${r.id}\n${r.texto}\n📅 ${format(r.fecha)}\n\n`;
   });
 
   ctx.reply(m);
@@ -67,7 +68,7 @@ bot.command('list', async ctx => {
 
 bot.command('notes', async ctx => {
   const rows = await db.getNotes(ctx.from.id);
-  if (!rows.length) return ctx.reply('Sin notas');
+  if (!rows.length) return ctx.reply('🗒 Sin notas');
 
   let m = '';
   rows.forEach(n => {
@@ -96,21 +97,29 @@ bot.on('text', async ctx => {
 
   if (msg.startsWith('/')) return;
 
-  // NOTES
+  // -------- NOTES --------
   if (msg.toLowerCase().startsWith('nota ')) {
     const raw = msg.slice(5);
     await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
-  // REMINDERS
+  // -------- REMINDERS --------
+
   const parsed = parseDate(msg);
-  if (!parsed) return ctx.reply('No entendí cuándo');
+  if (!parsed) return ctx.reply('No entendí cuándo ⏰');
 
   const date = moment(parsed.start.date()).tz(TIMEZONE);
-  if (date.isBefore(moment())) return ctx.reply('Fecha pasada');
+  if (date.isBefore(moment())) return ctx.reply('Fecha pasada ❌');
 
-  const text = cleanText(msg.replace(parsed.text, ''));
+  let text = msg
+    .replace(parsed.text, '')
+    .replace(/^(recordar|recordarme|recuérdame|avisar|avísame)/i, '')
+    .trim();
+
+  text = cleanText(text);
+
+  if (!text) text = 'Recordatorio';
 
   const id = await db.createReminder(
     ctx.from.id,
@@ -119,7 +128,7 @@ bot.on('text', async ctx => {
     extractTags(msg)
   );
 
-  ctx.reply(`⏰ ${text}\n${format(date)}\nID ${id}`);
+  ctx.reply(`⏰ ${text}\n📅 ${format(date)}\nID ${id}`);
 });
 
 // ---------- CRON ----------
