@@ -3,21 +3,13 @@ const { Telegraf } = require('telegraf');
 const express = require('express');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
-const chrono = require('chrono-node');
 const db = require('./db');
 const { Configuration, OpenAIApi } = require('openai');
 
-// ================= CONFIG =================
+// ================= CONFIGURACIÓN =================
 const TIMEZONE = process.env.TIMEZONE || 'America/Argentina/Buenos_Aires';
-const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-if (!BOT_TOKEN) {
-  console.error('❌ BOT_TOKEN no definido en .env');
-  process.exit(1);
-}
-
-// Configuración de OpenAI
 const aiClient = OPENAI_KEY
   ? new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }))
   : null;
@@ -29,8 +21,11 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`🌐 HTTP escuchando en ${PORT}`));
 
 // ================= BOT =================
-const bot = new Telegraf(BOT_TOKEN);
-bot.launch().then(() => console.log('🤖 Bot iniciado correctamente'));
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+bot.launch()
+  .then(() => console.log('🤖 Bot iniciado correctamente'))
+  .catch(err => console.error('❌ Error iniciando bot:', err));
 
 // ================= HELPERS =================
 function extractTags(text) {
@@ -42,7 +37,7 @@ function cleanText(text) {
   return text.replace(/#[\w]+/g, '').trim();
 }
 
-// ================= AI PARSER =================
+// ================= IA PARSER =================
 async function parseReminderWithAI(message) {
   if (!aiClient) return null;
 
@@ -71,48 +66,39 @@ Formato de salida JSON: { "date": "...", "texto": "...", "tags": "..." }
     const json = content.includes('{') ? JSON.parse(content.match(/\{[\s\S]*\}/)[0]) : null;
     return json;
   } catch (err) {
-    console.error('❌ Error AI parser:', err);
+    console.error('❌ Error AI parser:', err.message || err);
     return null;
   }
 }
 
-// ================= PROCESO DE RECORDATORIOS =================
-async function processReminder(ctx, text) {
-  let aiResult = null;
-
-  if (aiClient) {
-    try {
-      aiResult = await parseReminderWithAI(text);
-    } catch (err) {
-      console.error('❌ Error AI parser:', err);
-    }
+// ================= PRUEBA DE IA =================
+async function testAI() {
+  if (!aiClient) {
+    console.log('⚠️ IA no disponible: revisa tu OPENAI_KEY');
+    return;
   }
 
-  let date, reminderText, tags;
+  try {
+    const response = await aiClient.createChatCompletion({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: 'Di solo "IA lista" si estás funcionando' }],
+      temperature: 0
+    });
 
-  if (aiResult && aiResult.date && aiResult.texto) {
-    date = moment(aiResult.date).tz(TIMEZONE);
-    reminderText = aiResult.texto;
-    tags = aiResult.tags || '';
-  } else {
-    const parsed = chrono.es.parse(text, moment.tz(TIMEZONE).toDate(), { forwardDate: true });
-    if (!parsed.length) return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
-
-    date = moment(parsed[0].start.date()).tz(TIMEZONE);
-    if (date.isBefore(moment.tz(TIMEZONE))) return ctx.reply('❌ Fecha pasada');
-
-    reminderText = text.replace(parsed[0].text, '').trim();
-    tags = extractTags(text);
+    const content = response.data.choices[0].message.content;
+    console.log('🤖 IA funciona correctamente. Respuesta de prueba:', content);
+  } catch (err) {
+    console.error('❌ Error probando IA:', err.message || err);
   }
-
-  const id = await db.createReminder(ctx.from.id, reminderText, date.format('YYYY-MM-DD HH:mm:ss'), tags);
-  ctx.reply(`⏰ ${reminderText}\n📅 ${date.format('DD/MM HH:mm')}\nID ${id}`);
 }
+
+// Ejecutamos la prueba al inicio
+testAI();
 
 // ================= COMANDOS =================
 bot.start(ctx =>
   ctx.reply(`Hola 👋
-  
+
 Ejemplos:
 mañana llamar a Juan
 nota comprar pintura #trabajo
@@ -164,13 +150,28 @@ bot.on('text', async ctx => {
   const text = ctx.message.text;
   if (text.startsWith('/')) return;
 
+  // ---- NOTAS ----
   if (text.toLowerCase().startsWith('nota ')) {
     const raw = text.slice(5);
     await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
-  await processReminder(ctx, text);
+  // ---- RECORDATORIOS ----
+  const aiResult = await parseReminderWithAI(text);
+
+  if (!aiResult || !aiResult.date || !aiResult.texto) {
+    return ctx.reply('❌ No pude entender la fecha o el texto del recordatorio.');
+  }
+
+  const id = await db.createReminder(
+    ctx.from.id,
+    aiResult.texto,
+    aiResult.date,
+    aiResult.tags
+  );
+
+  ctx.reply(`⏰ ${aiResult.texto}\n📅 ${moment(aiResult.date).tz(TIMEZONE).format('DD/MM HH:mm')}\nID ${id}`);
 });
 
 // ================= CRON RECORDATORIOS =================
