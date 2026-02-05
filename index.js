@@ -10,105 +10,126 @@ const TIMEZONE = 'America/Argentina/Buenos_Aires';
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ---------------- HTTP ----------------
+// ---------- HTTP ----------
 
 const app = express();
 app.get('/', (_, res) => res.send('Bot online'));
 app.listen(process.env.PORT || 8080);
 
-// ---------------- HELPERS ----------------
+// ---------- HELPERS ----------
 
 function extractTags(text) {
-  const m = text.match(/#\w+/g);
-  return m ? m.map(t => t.replace('#', '')).join(',') : null;
+  const matches = text.match(/#[a-zA-Z0-9_]+/g);
+  return matches ? matches.join(',') : '';
 }
 
 function cleanText(text) {
-  return text.replace(/#\w+/g, '').trim();
+  return text.replace(/#[a-zA-Z0-9_]+/g, '').trim();
 }
 
 function parseDate(text) {
-  const results = chrono.es.parse(text, new Date(), { forwardDate: true });
+  const now = moment.tz(TIMEZONE).toDate();
+  const results = chrono.es.parse(text, now, { forwardDate: true });
   if (!results.length) return null;
-
-  return {
-    date: results[0].start.date(),
-    matched: results[0].text
-  };
+  return results[0];
 }
 
-function formatDate(d) {
-  return moment(d).tz(TIMEZONE).format('DD/MM/YYYY HH:mm');
+function format(date) {
+  return moment(date).tz(TIMEZONE).format('DD/MM HH:mm');
 }
 
-// ---------------- BOT ----------------
+// ---------- BOT ----------
 
-bot.start(ctx => ctx.reply(`👋 Hola!
+bot.start(ctx =>
+  ctx.reply(`Hola 👋
 
 Ejemplos:
-
-nota comprar pintura #trabajo
 mañana llamar a Juan
+nota comprar pintura #trabajo
 
 /list
 /notes
-/done <id>
-/delete <id>`));
-
-bot.command('notes', async ctx => {
-  const notes = await db.getNotes(ctx.from.id);
-  if (!notes.length) return ctx.reply('No hay notas');
-
-  let msg = '🗒 Notas:\n\n';
-
-  notes.forEach(n => {
-    msg += `• ${n.texto}`;
-    if (n.tags) msg += ` (${n.tags})`;
-    msg += '\n';
-  });
-
-  ctx.reply(msg);
-});
+/done ID
+/delete ID`)
+);
 
 bot.command('list', async ctx => {
-  const reminders = await db.getReminders(ctx.from.id);
+  const rows = await db.getReminders(ctx.from.id);
+  if (!rows.length) return ctx.reply('Vacío');
 
-  if (!reminders.length) return ctx.reply('Vacío');
-
-  let msg = '⏰ Recordatorios:\n\n';
-
-  reminders.forEach(r => {
-    msg += `🆔${r.id} ${r.texto}\n📅 ${formatDate(r.fecha)}\n\n`;
+  let m = '';
+  rows.forEach(r => {
+    m += `🆔 ${r.id}\n${r.texto}\n${format(r.fecha)}\n\n`;
   });
 
-  ctx.reply(msg);
+  ctx.reply(m);
+});
+
+bot.command('notes', async ctx => {
+  const rows = await db.getNotes(ctx.from.id);
+  if (!rows.length) return ctx.reply('Sin notas');
+
+  let m = '';
+  rows.forEach(n => {
+    m += `• ${n.texto}\n`;
+    if (n.tags) m += `🏷 ${n.tags}\n`;
+    m += '\n';
+  });
+
+  ctx.reply(m);
 });
 
 bot.command('done', async ctx => {
-  const id = parseInt(ctx.message.text.split(' ')[1]);
+  const id = Number(ctx.message.text.split(' ')[1]);
   const ok = await db.markAsDone(id, ctx.from.id);
   ctx.reply(ok ? '✅' : '❌');
 });
 
 bot.command('delete', async ctx => {
-  const id = parseInt(ctx.message.text.split(' ')[1]);
+  const id = Number(ctx.message.text.split(' ')[1]);
   const ok = await db.deleteReminder(id, ctx.from.id);
   ctx.reply(ok ? '🗑' : '❌');
 });
 
 bot.on('text', async ctx => {
-  const text = ctx.message.text;
+  const msg = ctx.message.text;
 
-  if (text.startsWith('/')) return;
-
-  const tags = extractTags(text);
-  const clean = cleanText(text);
+  if (msg.startsWith('/')) return;
 
   // NOTES
-  if (text.toLowerCase().startsWith('nota')) {
-    const content = clean.replace(/^nota/i, '').trim();
-    await db.createNote(ctx.from.id, content, tags);
+  if (msg.toLowerCase().startsWith('nota ')) {
+    const raw = msg.slice(5);
+    await db.createNote(ctx.from.id, cleanText(raw), extractTags(raw));
     return ctx.reply('🗒 Nota guardada');
   }
 
-  /
+  // REMINDERS
+  const parsed = parseDate(msg);
+  if (!parsed) return ctx.reply('No entendí cuándo');
+
+  const date = moment(parsed.start.date()).tz(TIMEZONE);
+  if (date.isBefore(moment())) return ctx.reply('Fecha pasada');
+
+  const text = cleanText(msg.replace(parsed.text, ''));
+
+  const id = await db.createReminder(
+    ctx.from.id,
+    text,
+    date.format('YYYY-MM-DD HH:mm:ss'),
+    extractTags(msg)
+  );
+
+  ctx.reply(`⏰ ${text}\n${format(date)}\nID ${id}`);
+});
+
+// ---------- CRON ----------
+
+cron.schedule('* * * * *', async () => {
+  const due = await db.getDueReminders();
+  for (const r of due) {
+    await bot.telegram.sendMessage(r.user_id, `⏰ ${r.texto}`);
+    await db.markAsSent(r.id);
+  }
+});
+
+bot.launch();
