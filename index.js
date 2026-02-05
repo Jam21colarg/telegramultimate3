@@ -16,6 +16,10 @@ const app = express();
 app.get('/', (_, res) => res.send('Bot online ✅'));
 app.listen(process.env.PORT || 8080);
 
+app.listen(PORT, () => {
+  console.log("🌐 HTTP escuchando en", PORT);
+});
+
 // ---------- HELPERS ----------
 
 function extractTags(text) {
