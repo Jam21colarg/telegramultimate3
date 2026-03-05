@@ -3,25 +3,26 @@ const { Telegraf } = require('telegraf');
 const express = require('express');
 const cron = require('node-cron');
 const moment = require('moment-timezone');
-const db = require('./db');
+const db = require('./db'); // El nuevo archivo de Supabase que creamos
 const OpenAI = require('openai');
 
+// --- CONFIGURACIÓN DE ENTORNO ---
 const TIMEZONE = process.env.TIMEZONE || 'America/Argentina/Buenos_Aires';
-const PORT = process.env.PORT || 8080;
-const PUBLIC_URL = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL;
-const DOMAIN = PUBLIC_URL ? `https://${PUBLIC_URL}` : process.env.DOMAIN;
+const PORT = process.env.PORT || 10000; // Render usa el 10000 por defecto
+// En Render, tu URL será https://nombre-de-tu-app.onrender.com
+const DOMAIN = process.env.RENDER_EXTERNAL_URL; 
 
 const app = express();
 app.use(express.json());
 
-// 1. INICIO RÁPIDO PARA RAILWAY
+// 1. INICIO DEL SERVIDOR (Vital para que Render y UptimeRobot no lo maten)
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Servidor activo en puerto ${PORT}`);
 });
 
-app.get('/', (req, res) => res.status(200).send('Ultimate Bot Online ✅'));
+app.get('/', (req, res) => res.status(200).send('Ultimate Bot Online ✅ (Running on Render)'));
 
-// 2. CONFIGURACIÓN IA
+// 2. CONFIGURACIÓN IA (Usando Groq)
 const openai = new OpenAI({
     apiKey: process.env.GROQ_API_KEY, 
     baseURL: "https://api.groq.com/openai/v1" 
@@ -30,7 +31,7 @@ const openai = new OpenAI({
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 /**
- * Función que procesa el mensaje con IA para decidir si es recordatorio o charla
+ * Función que procesa el mensaje con IA
  */
 async function processMessageWithAI(message) {
     const now = moment().tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss dddd');
@@ -66,7 +67,6 @@ bot.start(ctx => ctx.reply('¡Hola! 👋 Soy tu asistente. Podes decirme cosas c
 bot.on('text', async ctx => {
     if (ctx.message.text.startsWith('/')) return;
 
-    // Simula que el bot está procesando
     await ctx.sendChatAction('typing');
     
     try {
@@ -75,12 +75,10 @@ bot.on('text', async ctx => {
         if (!res) return ctx.reply('Perdón, me distraje un segundo. ¿Qué me decías?');
 
         if (res.es_recordatorio && res.date) {
-            // Guardar en DB de forma silenciosa
+            // Guardar en Supabase (usando el db.js nuevo)
             await db.createReminder(ctx.from.id, res.texto, res.date);
-            // Responder con la frase cálida de la IA
             await ctx.reply(res.respuesta);
         } else {
-            // Es solo charla, respondemos lo que la IA sugirió
             await ctx.reply(res.respuesta);
         }
 
@@ -90,14 +88,13 @@ bot.on('text', async ctx => {
     }
 });
 
-// 4. CRON (Envío de notificaciones)
+// 4. CRON (Envío de notificaciones cada minuto)
 cron.schedule('* * * * *', async () => {
     const now = moment().tz(TIMEZONE).format('YYYY-MM-DD HH:mm');
     try {
         const due = await db.getDueReminders(now);
         for (const r of due) {
-            // Notificación con formato limpio
-            await bot.telegram.sendMessage(r.user_id, `🔔 **¡Hola! Te recuerdo esto:**\n\n> ${r.texto}`);
+            await bot.telegram.sendMessage(r.user_id, `🔔 **¡Hola! Te recuerdo esto:**\n\n> ${r.texto}`, { parse_mode: 'Markdown' });
             await db.markAsSent(r.id);
         }
     } catch (e) { 
@@ -105,16 +102,17 @@ cron.schedule('* * * * *', async () => {
     }
 });
 
-// 5. WEBHOOK / DEPLOY
+// 5. CONFIGURACIÓN DE DESPLIEGUE (Render detecta DOMAIN automáticamente)
 if (DOMAIN) {
-    const secretPath = `/telegraf/${bot.secretPathComponent()}`;
-    app.use(bot.webhookCallback(secretPath));
-    bot.telegram.setWebhook(`${DOMAIN}${secretPath}`)
-        .then(() => console.log(`🤖 Webhook listo`))
+    bot.telegram.setWebhook(`${DOMAIN}/telegraf/${bot.secretPathComponent()}`)
+        .then(() => {
+            console.log(`🤖 Webhook configurado en: ${DOMAIN}`);
+            app.use(bot.webhookCallback(`/telegraf/${bot.secretPathComponent()}`));
+        })
         .catch(err => console.error('❌ Error Webhook:', err));
 } else {
     bot.launch();
-    console.log('🤖 Bot en modo Polling');
+    console.log('🤖 Bot en modo Polling (Local)');
 }
 
 // 6. CIERRE LIMPIO
