@@ -1,7 +1,7 @@
 {
   "name": "telegram-reminder-bot",
   "version": "1.0.0",
-  "description": "Bot de recordatorios y notas con integración OpenAI",
+  "description": "Bot de recordatorios con Supabase y Render",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -15,7 +15,7 @@
     "moment-timezone": "^0.5.44",
     "node-cron": "^3.0.3",
     "express": "^4.18.2",
-    "sqlite3": "^5.1.7",
+    "pg": "^8.11.3",
     "dotenv": "^16.4.1",
     "openai": "^4.26.0"
   }
