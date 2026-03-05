@@ -1,84 +1,89 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
-// 1. CONFIGURACIÓN DE RUTA (Prioriza el volumen de Railway)
-const MOUNT_PATH = '/data'; 
-const DB_NAME = 'reminders.db';
-
-let DB_PATH;
-
-// Verificamos si existe la carpeta del volumen
-if (fs.existsSync(MOUNT_PATH)) {
-    DB_PATH = path.join(MOUNT_PATH, DB_NAME);
-    console.log(`📂 Base de datos en volumen persistente: ${DB_PATH}`);
-} else {
-    DB_PATH = path.join(__dirname, DB_NAME);
-    console.log(`💻 Base de datos en modo local: ${DB_PATH}`);
-}
-
-const db = new sqlite3.Database(DB_PATH);
-
-// 2. INICIALIZACIÓN ROBUSTA
-db.serialize(() => {
-  // Crear tabla principal
-  db.run(`CREATE TABLE IF NOT EXISTS reminders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    texto TEXT NOT NULL,
-    fecha TEXT NOT NULL,
-    estado TEXT DEFAULT 'pendiente',
-    tags TEXT DEFAULT '',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  // PARCHE: Asegurar que la columna 'tags' exista por si la tabla es vieja
-  db.run(`ALTER TABLE reminders ADD COLUMN tags TEXT DEFAULT ''`, (err) => {
-      if (!err) console.log('✅ Columna "tags" añadida correctamente.');
-  });
-
-  console.log('✅ Estructura de DB lista.');
+// 1. CONFIGURACIÓN DE CONEXIÓN (Render leerá la variable de entorno)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false // Necesario para la conexión segura con Supabase
+  }
 });
 
-// 3. EXPORTACIÓN DE MÉTODOS
+// 2. INICIALIZACIÓN ROBUSTA (Equivalente a db.serialize de SQLite)
+const initDB = async () => {
+  try {
+    // Crear tabla principal si no existe
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reminders (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        texto TEXT NOT NULL,
+        fecha TEXT NOT NULL,
+        estado TEXT DEFAULT 'pendiente',
+        tags TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // PARCHE: Intentar añadir la columna 'tags' por si la tabla ya existía sin ella
+    try {
+      await pool.query(`ALTER TABLE reminders ADD COLUMN tags TEXT DEFAULT ''`);
+      console.log('✅ Columna "tags" añadida correctamente.');
+    } catch (err) {
+      // Ignoramos el error si la columna ya existe
+    }
+
+    console.log('✅ Estructura de DB en Supabase lista.');
+  } catch (err) {
+    console.error('❌ Error inicializando Supabase:', err);
+  }
+};
+
+initDB();
+
+// 3. EXPORTACIÓN DE MÉTODOS (Convertidos a Promesas con Async/Await)
 module.exports = {
-  createReminder: (user_id, texto, fecha, tags = '') => {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO reminders (user_id, texto, fecha, tags) VALUES (?,?,?,?)`,
-        [user_id, texto, fecha, tags],
-        function(err) {
-          if (err) reject(err);
-          else resolve(this.lastID);
-        }
+  createReminder: async (user_id, texto, fecha, tags = '') => {
+    try {
+      const res = await pool.query(
+        `INSERT INTO reminders (user_id, texto, fecha, tags) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [user_id, texto, fecha, tags]
       );
-    });
+      return res.rows[0].id;
+    } catch (err) {
+      throw err;
+    }
   },
 
-  getReminders: (user_id, estado = 'pendiente') => {
-    return new Promise((resolve, reject) => {
-      db.all(`SELECT * FROM reminders WHERE user_id=? AND estado=? ORDER BY fecha ASC`, [user_id, estado], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      });
-    });
+  getReminders: async (user_id, estado = 'pendiente') => {
+    try {
+      const res = await pool.query(
+        `SELECT * FROM reminders WHERE user_id=$1 AND estado=$2 ORDER BY fecha ASC`,
+        [user_id, estado]
+      );
+      return res.rows || [];
+    } catch (err) {
+      throw err;
+    }
   },
 
-  getDueReminders: (currentTime) => {
-    return new Promise((resolve, reject) => {
-      db.all(`SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= ?`, [currentTime], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      });
-    });
+  getDueReminders: async (currentTime) => {
+    try {
+      const res = await pool.query(
+        `SELECT * FROM reminders WHERE estado='pendiente' AND fecha <= $1`,
+        [currentTime]
+      );
+      return res.rows || [];
+    } catch (err) {
+      throw err;
+    }
   },
 
-  markAsSent: (id) => {
-    return new Promise((resolve, reject) => {
-      db.run(`UPDATE reminders SET estado='enviado' WHERE id=?`, [id], (err) => {
-        if (err) reject(err);
-        else resolve(true);
-      });
-    });
+  markAsSent: async (id) => {
+    try {
+      await pool.query(`UPDATE reminders SET estado='enviado' WHERE id=$1`, [id]);
+      return true;
+    } catch (err) {
+      throw err;
+    }
   }
 };
